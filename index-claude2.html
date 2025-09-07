@@ -1,0 +1,621 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Ontology Graph Explorer</title>
+    
+    <!-- TailwindCSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    
+    <!-- vis-network for graph visualization -->
+    <script src="https://cdn.jsdelivr.net/npm/vis-network@9.1.2/standalone/umd/vis-network.min.js"></script>
+    
+    <!-- NeoVis for Neo4j integration -->
+    <script src="https://cdn.jsdelivr.net/npm/neovis.js@2.0.2/dist/neovis.js"></script>
+    
+    <!-- Vue 3 -->
+    <script src="https://unpkg.com/vue@3/dist/vue.global.js"></script>
+    
+    <style>
+        [v-cloak] { display: none; }
+        
+        .graph-container {
+            /* background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); */
+            position: relative;
+            overflow: hidden;
+        }
+        
+        .graph-container::before {
+            content: '';
+            position: absolute;
+            inset: 0;
+            background: radial-gradient(circle at 30% 50%, rgba(255,255,255,0.1) 0%, transparent 70%);
+            pointer-events: none;
+        }
+        
+        #viz {
+            background: rgba(255, 255, 255, 0.95);
+            backdrop-filter: blur(10px);
+            border: 1px solid rgba(255, 255, 255, 0.3);
+        }
+
+        .glass-panel {
+            background: rgba(255, 255, 255, 0.9);
+            backdrop-filter: blur(20px);
+            border: 1px solid rgba(255, 255, 255, 0.3);
+        }
+
+        .mode-button {
+            transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+        }
+
+        .mode-button:hover {
+            transform: translateY(-2px);
+        }
+
+        .chat-message {
+            animation: slideIn 0.3s ease-out;
+        }
+
+        @keyframes slideIn {
+            from {
+                opacity: 0;
+                transform: translateX(20px);
+            }
+            to {
+                opacity: 1;
+                transform: translateX(0);
+            }
+        }
+
+        .status-indicator {
+            animation: pulse 2s infinite;
+        }
+
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.5; }
+        }
+    </style>
+</head>
+<body class="bg-gradient-to-br from-gray-50 to-gray-100 min-h-screen">
+    <div id="app" v-cloak>
+        <!-- Header -->
+        <header class="bg-white/80 backdrop-blur-md shadow-sm sticky top-0 z-50 border-b border-gray-200">
+            <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+                <div class="flex justify-between items-center py-4">
+                    <div class="flex items-center space-x-3">
+                        <div class="w-10 h-10 bg-gradient-to-r from-purple-600 to-blue-600 rounded-xl flex items-center justify-center">
+                            <svg class="w-6 h-6 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"></path>
+                            </svg>
+                        </div>
+                        <h1 class="text-2xl font-bold bg-gradient-to-r from-purple-600 to-blue-600 bg-clip-text text-transparent">
+                            Ontology Graph Explorer
+                        </h1>
+                    </div>
+                    <div class="flex items-center space-x-4">
+                        <span class="status-indicator px-3 py-1 rounded-full text-sm" 
+                              :class="statusColor">
+                            {{ status }}
+                        </span>
+                        <button @click="toggleChat" 
+                                class="px-4 py-2 bg-gradient-to-r from-purple-600 to-blue-600 text-white rounded-xl hover:shadow-lg transition-all duration-300 transform hover:scale-105">
+                            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z"></path>
+                            </svg>
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </header>
+
+        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+            <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+                <!-- Main Graph Panel -->
+                <div class="lg:col-span-2 space-y-6">
+                    <!-- Controls -->
+                    <div class="glass-panel rounded-2xl p-6 shadow-xl">
+                        <div class="space-y-4">
+                            <!-- Mode Selector -->
+                            <div class="flex flex-wrap gap-3">
+                                <div class="inline-flex bg-gray-100 rounded-xl p-1">
+                                    <button v-for="m in modes" :key="m"
+                                            @click="mode = m"
+                                            :class="['mode-button px-4 py-2 rounded-lg text-sm font-medium transition-all',
+                                                     mode === m ? 'bg-white shadow-md text-purple-600' : 'text-gray-600 hover:text-gray-900']">
+                                        {{ m === 'mock' ? '🎭 Mock Data' : '🔗 Neo4j' }}
+                                    </button>
+                                </div>
+                                
+                                <div class="flex gap-2">
+                                    <label class="inline-flex items-center px-3 py-2 bg-white rounded-lg shadow-sm cursor-pointer hover:shadow-md transition-shadow">
+                                        <input type="checkbox" v-model="physics" class="rounded text-purple-600 focus:ring-purple-500">
+                                        <span class="ml-2 text-sm">Physics</span>
+                                    </label>
+                                    
+                                    <label class="inline-flex items-center px-3 py-2 bg-white rounded-lg shadow-sm cursor-pointer hover:shadow-md transition-shadow">
+                                        <input type="checkbox" v-model="hierarchical" class="rounded text-purple-600 focus:ring-purple-500">
+                                        <span class="ml-2 text-sm">Hierarchical</span>
+                                    </label>
+                                    
+                                    <button @click="fitGraph" 
+                                            class="px-4 py-2 bg-white rounded-lg shadow-sm hover:shadow-md transition-all text-sm font-medium">
+                                        🎯 Fit View
+                                    </button>
+                                </div>
+                            </div>
+
+                            <!-- Neo4j Connection (shown only in neo4j mode) -->
+                            <div v-if="mode === 'neo4j'" class="space-y-3 p-4 bg-gray-50 rounded-xl">
+                                <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
+                                    <input v-model="neo4jConfig.url" 
+                                           placeholder="bolt://localhost:7687"
+                                           class="px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-transparent">
+                                    <input v-model="neo4jConfig.database" 
+                                           placeholder="neo4j"
+                                           class="px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-transparent">
+                                    <input v-model="neo4jConfig.user" 
+                                           placeholder="neo4j"
+                                           class="px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-transparent">
+                                    <input v-model="neo4jConfig.password" 
+                                           type="password"
+                                           placeholder="password"
+                                           class="px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-transparent">
+                                </div>
+                                <textarea v-model="neo4jConfig.cypher"
+                                          placeholder="MATCH (n)-[r]->(m) RETURN n,r,m LIMIT 50"
+                                          rows="2"
+                                          class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-transparent resize-none">
+                                </textarea>
+                                <button @click="connectNeo4j"
+                                        class="w-full py-2 bg-gradient-to-r from-purple-600 to-blue-600 text-white rounded-lg hover:shadow-lg transition-all duration-300 transform hover:scale-[1.02]">
+                                    Connect to Neo4j
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Graph Visualization -->
+                    <div class="graph-container rounded-2xl shadow-2xl p-1">
+                        <div id="viz" class="rounded-xl" style="height: 600px;"></div>
+                    </div>
+
+                    <!-- Info Panel -->
+                    <div class="glass-panel rounded-2xl p-6 shadow-xl">
+                        <h3 class="text-lg font-semibold mb-3 text-gray-800">Graph Information</h3>
+                        <div class="grid grid-cols-2 md:grid-cols-4 gap-4">
+                            <div class="text-center p-3 bg-purple-50 rounded-lg">
+                                <div class="text-2xl font-bold text-purple-600">{{ nodeCount }}</div>
+                                <div class="text-sm text-gray-600">Nodes</div>
+                            </div>
+                            <div class="text-center p-3 bg-blue-50 rounded-lg">
+                                <div class="text-2xl font-bold text-blue-600">{{ edgeCount }}</div>
+                                <div class="text-sm text-gray-600">Edges</div>
+                            </div>
+                            <div class="text-center p-3 bg-green-50 rounded-lg">
+                                <div class="text-2xl font-bold text-green-600">{{ selectedNode || '-' }}</div>
+                                <div class="text-sm text-gray-600">Selected</div>
+                            </div>
+                            <div class="text-center p-3 bg-orange-50 rounded-lg">
+                                <div class="text-2xl font-bold text-orange-600">{{ mode }}</div>
+                                <div class="text-sm text-gray-600">Mode</div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Chat Panel -->
+                <div v-show="showChat" class="lg:col-span-1">
+                    <div class="glass-panel rounded-2xl p-6 shadow-xl sticky top-24">
+                        <h2 class="text-lg font-semibold mb-4 text-gray-800">AI Assistant</h2>
+                        
+                        <!-- Messages -->
+                        <div class="h-96 overflow-y-auto space-y-3 mb-4 pr-2">
+                            <div v-for="(msg, idx) in messages" :key="idx"
+                                 class="chat-message flex"
+                                 :class="msg.role === 'user' ? 'justify-end' : 'justify-start'">
+                                <div class="max-w-[80%] px-4 py-2 rounded-2xl shadow-sm"
+                                     :class="msg.role === 'user' 
+                                             ? 'bg-gradient-to-r from-purple-600 to-blue-600 text-white rounded-br-sm' 
+                                             : 'bg-gray-100 text-gray-800 rounded-bl-sm'">
+                                    {{ msg.text }}
+                                </div>
+                            </div>
+                        </div>
+                        
+                        <!-- Input -->
+                        <div class="flex gap-2">
+                            <textarea v-model="chatInput"
+                                      @keydown.ctrl.enter="sendMessage"
+                                      @keydown.meta.enter="sendMessage"
+                                      placeholder="Ask about the graph... (Ctrl+Enter to send)"
+                                      rows="2"
+                                      class="flex-1 px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-transparent resize-none">
+                            </textarea>
+                            <button @click="sendMessage"
+                                    class="px-4 py-2 bg-gradient-to-r from-purple-600 to-blue-600 text-white rounded-lg hover:shadow-lg transition-all duration-300">
+                                <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8"></path>
+                                </svg>
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const { createApp } = Vue;
+
+        createApp({
+            data() {
+                return {
+                    mode: 'mock',
+                    modes: ['mock', 'neo4j'],
+                    status: 'Ready',
+                    physics: true,
+                    hierarchical: false,
+                    showChat: true,
+                    
+                    // Graph data
+                    network: null,
+                    neoViz: null,
+                    nodeCount: 0,
+                    edgeCount: 0,
+                    selectedNode: null,
+                    
+                    // Neo4j config
+                    neo4jConfig: {
+                        url: 'bolt://localhost:7687',
+                        user: 'neo4j',
+                        password: 'password',
+                        database: 'neo4j',
+                        cypher: 'MATCH (n)-[r]->(m) RETURN n,r,m LIMIT 50'
+                    },
+                    
+                    // Chat
+                    messages: [
+                        { role: 'assistant', text: 'Hello! I can help you explore and understand this ontology graph. What would you like to know?' }
+                    ],
+                    chatInput: '',
+                    
+                    // Mock data
+                    mockData: {
+                        nodes: [
+                            { id: 1, label: 'Ontology', group: 'root', title: 'Root concept' },
+                            { id: 2, label: 'Entity', group: 'class', title: 'Base entity class' },
+                            { id: 3, label: 'Person', group: 'class', title: 'Person entity' },
+                            { id: 4, label: 'Organization', group: 'class', title: 'Organization entity' },
+                            { id: 5, label: 'Location', group: 'class', title: 'Location entity' },
+                            { id: 6, label: 'hasName', group: 'property', title: 'Name property' },
+                            { id: 7, label: 'hasAge', group: 'property', title: 'Age property' },
+                            { id: 8, label: 'locatedIn', group: 'relation', title: 'Location relation' },
+                            { id: 9, label: 'worksFor', group: 'relation', title: 'Employment relation' },
+                            { id: 10, label: 'Event', group: 'class', title: 'Event entity' },
+                            { id: 11, label: 'hasDate', group: 'property', title: 'Date property' },
+                            { id: 12, label: 'participatesIn', group: 'relation', title: 'Participation relation' }
+                        ],
+                        edges: [
+                            { from: 1, to: 2, label: 'contains', arrows: 'to' },
+                            { from: 2, to: 3, label: 'subClassOf', arrows: 'to', dashes: true },
+                            { from: 2, to: 4, label: 'subClassOf', arrows: 'to', dashes: true },
+                            { from: 2, to: 5, label: 'subClassOf', arrows: 'to', dashes: true },
+                            { from: 2, to: 10, label: 'subClassOf', arrows: 'to', dashes: true },
+                            { from: 3, to: 6, label: 'hasProperty', arrows: 'to' },
+                            { from: 3, to: 7, label: 'hasProperty', arrows: 'to' },
+                            { from: 3, to: 9, label: 'hasRelation', arrows: 'to' },
+                            { from: 4, to: 6, label: 'hasProperty', arrows: 'to' },
+                            { from: 4, to: 8, label: 'hasRelation', arrows: 'to' },
+                            { from: 5, to: 6, label: 'hasProperty', arrows: 'to' },
+                            { from: 10, to: 11, label: 'hasProperty', arrows: 'to' },
+                            { from: 3, to: 12, label: 'hasRelation', arrows: 'to' },
+                            { from: 10, to: 12, label: 'hasRelation', arrows: 'from' }
+                        ]
+                    }
+                };
+            },
+            
+            computed: {
+                statusColor() {
+                    const colors = {
+                        'Ready': 'bg-green-100 text-green-800',
+                        'Connecting...': 'bg-yellow-100 text-yellow-800',
+                        'Error': 'bg-red-100 text-red-800',
+                        'Loading...': 'bg-blue-100 text-blue-800'
+                    };
+                    return colors[this.status] || 'bg-gray-100 text-gray-800';
+                },
+                
+                visOptions() {
+                    return {
+                        nodes: {
+                            shape: 'dot',
+                            size: 25,
+                            font: {
+                                size: 14,
+                                color: '#333333',
+                                face: 'system-ui'
+                            },
+                            borderWidth: 2,
+                            shadow: true
+                        },
+                        edges: {
+                            width: 2,
+                            font: {
+                                size: 12,
+                                align: 'middle',
+                                color: '#666666'
+                            },
+                            color: {
+                                color: '#848484',
+                                highlight: '#7C4DFF',
+                                hover: '#7C4DFF'
+                            },
+                            smooth: {
+                                type: 'dynamic'
+                            },
+                            shadow: true
+                        },
+                        groups: {
+                            root: {
+                                color: {
+                                    background: '#9C27B0',
+                                    border: '#7B1FA2',
+                                    highlight: {
+                                        background: '#AB47BC',
+                                        border: '#8E24AA'
+                                    }
+                                },
+                                font: { color: 'white' }
+                            },
+                            class: {
+                                color: {
+                                    background: '#2196F3',
+                                    border: '#1976D2',
+                                    highlight: {
+                                        background: '#42A5F5',
+                                        border: '#1E88E5'
+                                    }
+                                },
+                                font: { color: 'white' }
+                            },
+                            property: {
+                                color: {
+                                    background: '#4CAF50',
+                                    border: '#388E3C',
+                                    highlight: {
+                                        background: '#66BB6A',
+                                        border: '#43A047'
+                                    }
+                                },
+                                font: { color: 'white' },
+                                shape: 'box'
+                            },
+                            relation: {
+                                color: {
+                                    background: '#FF9800',
+                                    border: '#F57C00',
+                                    highlight: {
+                                        background: '#FFB74D',
+                                        border: '#FB8C00'
+                                    }
+                                },
+                                font: { color: 'white' },
+                                shape: 'diamond'
+                            }
+                        },
+                        physics: {
+                            enabled: this.physics,
+                            barnesHut: {
+                                gravitationalConstant: -8000,
+                                centralGravity: 0.3,
+                                springLength: 120,
+                                springConstant: 0.04
+                            },
+                            stabilization: {
+                                iterations: 150
+                            }
+                        },
+                        layout: this.hierarchical ? {
+                            hierarchical: {
+                                direction: 'UD',
+                                sortMethod: 'directed',
+                                levelSeparation: 150,
+                                nodeSpacing: 200
+                            }
+                        } : {},
+                        interaction: {
+                            hover: true,
+                            tooltipDelay: 100,
+                            zoomView: true,
+                            dragView: true
+                        }
+                    };
+                }
+            },
+            
+            watch: {
+                mode() {
+                    this.renderGraph();
+                },
+                physics() {
+                    this.updatePhysics();
+                },
+                hierarchical() {
+                    this.renderGraph();
+                }
+            },
+            
+            mounted() {
+                this.renderGraph();
+            },
+            
+            methods: {
+                renderGraph() {
+                    if (this.mode === 'mock') {
+                        this.renderMockGraph();
+                    } else {
+                        this.connectNeo4j();
+                    }
+                },
+                
+                renderMockGraph() {
+                    this.status = 'Loading...';
+                    
+                    // Clean up existing network
+                    if (this.network) {
+                        this.network.destroy();
+                        this.network = null;
+                    }
+                    if (this.neoViz) {
+                        this.neoViz = null;
+                    }
+                    
+                    const container = document.getElementById('viz');
+                    const data = {
+                        nodes: new vis.DataSet(this.mockData.nodes),
+                        edges: new vis.DataSet(this.mockData.edges)
+                    };
+                    
+                    this.nodeCount = this.mockData.nodes.length;
+                    this.edgeCount = this.mockData.edges.length;
+                    
+                    this.network = new vis.Network(container, data, this.visOptions);
+                    
+                    this.network.on('selectNode', (params) => {
+                        if (params.nodes.length > 0) {
+                            const nodeId = params.nodes[0];
+                            const node = this.mockData.nodes.find(n => n.id === nodeId);
+                            this.selectedNode = node ? node.label : null;
+                        }
+                    });
+                    
+                    this.network.on('deselectNode', () => {
+                        this.selectedNode = null;
+                    });
+                    
+                    this.network.once('stabilized', () => {
+                        this.status = 'Ready';
+                        this.fitGraph();
+                    });
+                },
+                
+                connectNeo4j() {
+                    this.status = 'Connecting...';
+                    
+                    // Clean up existing network
+                    if (this.network) {
+                        this.network.destroy();
+                        this.network = null;
+                    }
+                    
+                    try {
+                        const NeoVis = window.NeoVis?.default || window.NeoVis;
+                        
+                        if (!NeoVis) {
+                            throw new Error('NeoVis library not loaded');
+                        }
+                        
+                        const config = {
+                            containerId: 'viz',
+                            neo4j: {
+                                serverUrl: this.neo4jConfig.url,
+                                serverUser: this.neo4jConfig.user,
+                                serverPassword: this.neo4jConfig.password,
+                                database: this.neo4jConfig.database
+                            },
+                            labels: {
+                                // Define your ontology labels here
+                                Class: {
+                                    caption: 'name',
+                                    size: 'pagerank',
+                                    community: 'community'
+                                },
+                                Property: {
+                                    caption: 'name',
+                                    size: 'pagerank'
+                                },
+                                Instance: {
+                                    caption: 'name'
+                                }
+                            },
+                            relationships: {
+                                SUBCLASS_OF: {
+                                    caption: true,
+                                    thickness: 'weight'
+                                },
+                                HAS_PROPERTY: {
+                                    caption: true
+                                },
+                                INSTANCE_OF: {
+                                    caption: true
+                                }
+                            },
+                            initialCypher: this.neo4jConfig.cypher,
+                            visConfig: this.visOptions
+                        };
+                        
+                        this.neoViz = new NeoVis(config);
+                        this.neoViz.render();
+                        
+                        this.neoViz.registerOnEvent('completed', (e) => {
+                            this.status = 'Ready';
+                            this.nodeCount = e.nodes.length;
+                            this.edgeCount = e.edges.length;
+                        });
+                        
+                    } catch (error) {
+                        console.error('Neo4j connection error:', error);
+                        this.status = 'Error';
+                        alert('Failed to connect to Neo4j. Please check your connection settings.');
+                        this.mode = 'mock';
+                    }
+                },
+                
+                updatePhysics() {
+                    if (this.network) {
+                        this.network.setOptions({ physics: { enabled: this.physics } });
+                    }
+                },
+                
+                fitGraph() {
+                    if (this.network) {
+                        this.network.fit({ animation: true });
+                    } else if (this.neoViz && this.neoViz._network) {
+                        this.neoViz._network.fit({ animation: true });
+                    }
+                },
+                
+                toggleChat() {
+                    this.showChat = !this.showChat;
+                },
+                
+                sendMessage() {
+                    const text = this.chatInput.trim();
+                    if (!text) return;
+                    
+                    this.messages.push({ role: 'user', text });
+                    
+                    // Simulate AI response (replace with actual API call)
+                    setTimeout(() => {
+                        const responses = [
+                            'Based on the graph structure, I can see several key relationships between entities.',
+                            'The ontology shows a hierarchical structure with classes, properties, and relations.',
+                            'This is interesting! The graph reveals important connections in your data model.',
+                            'I notice there are multiple entity types connected through various relationships.',
+                            'The visualization helps understand the complexity of your ontology structure.'
+                        ];
+                        const response = responses[Math.floor(Math.random() * responses.length)];
+                        this.messages.push({ role: 'assistant', text: response });
+                    }, 500);
+                    
+                    this.chatInput = '';
+                }
+            }
+        }).mount('#app');
+    </script>
+</body>
+</html>
