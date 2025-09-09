@@ -1,7 +1,10 @@
+import type { Dayjs } from 'dayjs'
+
 // 채팅 메시지 타입
 export interface ChatMessage {
   role: 'user' | 'assistant'
   text: string
+  timestamp: Dayjs
 }
 
 // 그래프 노드 타입

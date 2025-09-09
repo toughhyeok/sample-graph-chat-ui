@@ -3,29 +3,27 @@
     <!-- 컨트롤 패널 -->
     <div class="flex flex-wrap items-center gap-2">
       <!-- 물리 효과 체크박스 -->
-      <label class="inline-flex items-center gap-2 bg-white px-3 py-2 rounded-2xl shadow">
+      <label class="inline-flex items-center gap-2 bg-white px-3 py-2 rounded-md shadow">
         <input type="checkbox" v-model="physics" class="rounded">
         <span class="text-sm">Physics</span>
       </label>
       
       <!-- 계층 구조 체크박스 -->
-      <label class="inline-flex items-center gap-2 bg-white px-3 py-2 rounded-2xl shadow">
+      <label class="inline-flex items-center gap-2 bg-white px-3 py-2 rounded-md shadow">
         <input type="checkbox" v-model="hierarchical" class="rounded">
         <span class="text-sm">Hierarchical</span>
       </label>
       
       <!-- Fit 버튼 -->
-      <button @click="fit" class="px-3 py-2 rounded-2xl bg-white shadow hover:bg-gray-50">
+      <button @click="fit" class="px-3 py-2 rounded-md bg-white shadow hover:bg-gray-50">
         Fit
       </button>
       
-      <!-- 상태 표시 -->
-      <span class="text-sm text-gray-500">Status: {{ status }}</span>
     </div>
 
     <!-- 그래프 컨테이너 -->
-    <div :style="{ height: height }" class="bg-white rounded-2xl shadow relative">
-      <div id="graph-container" ref="container" class="absolute inset-0 rounded-2xl"></div>
+    <div :style="{ height: height }" class="bg-white rounded-lg shadow relative">
+      <div id="graph-container" ref="container" class="absolute inset-0 rounded-lg"></div>
     </div>
   </div>
 </template>
@@ -63,7 +61,6 @@ const network = ref<any>(null) // vis.Network 인스턴스
 // UI 상태
 const physics = ref<boolean>(true)
 const hierarchical = ref<boolean>(false)
-const status = ref<GraphStatus>('ready')
 
 // 모크 온톨로지 데이터
 const mockData = reactive<MockGraphData>({
@@ -121,7 +118,6 @@ const visOptions = computed(() => ({
 
 // 모크 그래프 렌더링
 const renderMock = async (): Promise<void> => {
-  status.value = 'rendering'
   await nextTick()
   
   const data = {
@@ -135,9 +131,6 @@ const renderMock = async (): Promise<void> => {
   
   if (container.value) {
     network.value = new window.vis.Network(container.value, data, visOptions.value)
-    network.value.once('stabilized', () => {
-      status.value = 'ready'
-    })
   }
 }
 

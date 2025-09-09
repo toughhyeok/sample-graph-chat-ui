@@ -9,6 +9,7 @@
     "type-check": "vue-tsc --noEmit"
   },
   "dependencies": {
+    "dayjs": "^1.11.18",
     "vue": "^3.4.21"
   },
   "devDependencies": {
