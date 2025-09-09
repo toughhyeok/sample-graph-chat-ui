@@ -1,7 +1,7 @@
 <template>
   <div class="flex flex-col h-full">
     <!-- 메시지 영역 -->
-    <div class="flex-1 overflow-y-auto space-y-3 p-3 rounded-lg bg-white shadow-inner">
+    <div ref="messagesContainer" class="flex-1 overflow-y-auto space-y-3 p-3 rounded-lg bg-white shadow-inner">
       <div 
         v-for="(message, index) in messages" 
         :key="index" 
@@ -20,6 +20,22 @@
         </div>
         <div class="text-xs text-gray-400 mt-1">
           {{ formatTime(message.timestamp) }}
+        </div>
+      </div>
+      
+      <!-- 로딩 메시지 -->
+      <div v-if="isLoading" class="flex flex-col items-start">
+        <div class="max-w-[80%] px-4 py-2 rounded-lg shadow bg-gray-100 text-gray-900 rounded-bl-sm">
+          <div class="flex items-center gap-2">
+            <div class="flex gap-1">
+              <div class="w-2 h-2 bg-gray-400 rounded-full animate-bounce"></div>
+              <div class="w-2 h-2 bg-gray-400 rounded-full animate-bounce" style="animation-delay: 0.1s"></div>
+              <div class="w-2 h-2 bg-gray-400 rounded-full animate-bounce" style="animation-delay: 0.2s"></div>
+            </div>
+          </div>
+        </div>
+        <div class="text-xs text-gray-400 mt-1">
+          now
         </div>
       </div>
     </div>
@@ -50,7 +66,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref } from 'vue'
+import { ref, nextTick } from 'vue'
 import dayjs from 'dayjs'
 import type { ChatMessage } from '../types'
 
@@ -69,6 +85,17 @@ const formatTime = (timestamp: any): string => {
 // 로딩 상태
 const isLoading = ref<boolean>(false)
 
+// 메시지 컨테이너 참조
+const messagesContainer = ref<HTMLElement | null>(null)
+
+// 스크롤을 맨 아래로 이동하는 함수
+const scrollToBottom = async () => {
+  await nextTick()
+  if (messagesContainer.value) {
+    messagesContainer.value.scrollTop = messagesContainer.value.scrollHeight
+  }
+}
+
 // 메소드들
 const send = async (): Promise<void> => {
   const text = input.value.trim()
@@ -79,6 +106,9 @@ const send = async (): Promise<void> => {
   messages.value.push(userMessage)
   input.value = ''
   isLoading.value = true
+  
+  // 스크롤 이동
+  await scrollToBottom()
   
   try {
     // FastAPI 서버로 직접 요청
@@ -113,6 +143,9 @@ const send = async (): Promise<void> => {
         text: data.content[0].text,
         timestamp: dayjs()
       })
+      
+      // 스크롤 이동
+      await scrollToBottom()
     } else {
       throw new Error('No content in response')
     }
