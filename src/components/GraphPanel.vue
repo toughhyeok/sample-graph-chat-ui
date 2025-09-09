@@ -2,28 +2,6 @@
   <div class="space-y-3">
     <!-- 컨트롤 패널 -->
     <div class="flex flex-wrap items-center gap-2">
-      <!-- 모드 선택 -->
-      <div class="inline-flex bg-white rounded-2xl shadow overflow-hidden">
-        <button 
-          @click="switchMode('mock')" 
-          :class="[
-            'px-3 py-2', 
-            mode === 'mock' ? 'bg-gray-900 text-white' : 'text-gray-700'
-          ]"
-        >
-          Mock
-        </button>
-        <button 
-          @click="switchMode('neovis')" 
-          :class="[
-            'px-3 py-2', 
-            mode === 'neovis' ? 'bg-gray-900 text-white' : 'text-gray-700'
-          ]"
-        >
-          Neo4j (NeoVis)
-        </button>
-      </div>
-      
       <!-- 물리 효과 체크박스 -->
       <label class="inline-flex items-center gap-2 bg-white px-3 py-2 rounded-2xl shadow">
         <input type="checkbox" v-model="physics" class="rounded">
@@ -45,42 +23,6 @@
       <span class="text-sm text-gray-500">Status: {{ status }}</span>
     </div>
 
-    <!-- Neo4j 연결 설정 (neovis 모드일 때만 표시) -->
-    <div v-if="mode === 'neovis'" class="grid md:grid-cols-5 gap-2 bg-white p-3 rounded-2xl shadow">
-      <input 
-        v-model="neo4j.url" 
-        placeholder="bolt://host:7687" 
-        class="md:col-span-2 rounded-xl border p-2" 
-      />
-      <input 
-        v-model="neo4j.user" 
-        placeholder="neo4j" 
-        class="rounded-xl border p-2" 
-      />
-      <input 
-        v-model="neo4j.password" 
-        placeholder="password" 
-        type="password" 
-        class="rounded-xl border p-2" 
-      />
-      <input 
-        v-model="neo4j.database" 
-        placeholder="neo4j" 
-        class="rounded-xl border p-2" 
-      />
-      <input 
-        v-model="neo4j.initialCypher" 
-        placeholder="MATCH (n)-[r]->(m) RETURN n,r,m LIMIT 50" 
-        class="md:col-span-4 rounded-xl border p-2" 
-      />
-      <button 
-        @click="switchMode('neovis')" 
-        class="md:col-span-1 px-3 py-2 rounded-xl bg-blue-600 text-white shadow hover:bg-blue-700"
-      >
-        Connect
-      </button>
-    </div>
-
     <!-- 그래프 컨테이너 -->
     <div :style="{ height: height }" class="bg-white rounded-2xl shadow relative">
       <div id="graph-container" ref="container" class="absolute inset-0 rounded-2xl"></div>
@@ -91,9 +33,7 @@
 <script setup lang="ts">
 import { ref, reactive, computed, onMounted, watch, nextTick } from 'vue'
 import type { 
-  GraphMode, 
   GraphStatus, 
-  Neo4jConfig, 
   MockGraphData 
 } from '../types'
 
@@ -119,22 +59,11 @@ const props = withDefaults(defineProps<Props>(), {
 // 반응성 데이터
 const container = ref<HTMLElement | null>(null)
 const network = ref<any>(null) // vis.Network 인스턴스
-const viz = ref<any>(null) // NeoVis 인스턴스
 
 // UI 상태
-const mode = ref<GraphMode>('mock')
 const physics = ref<boolean>(true)
 const hierarchical = ref<boolean>(false)
 const status = ref<GraphStatus>('ready')
-
-// Neo4j 연결 설정
-const neo4j = reactive<Neo4jConfig>({
-  url: 'bolt://localhost:7687',
-  user: 'neo4j',
-  password: 'password',
-  database: 'neo4j',
-  initialCypher: 'MATCH (n)-[r]->(m) RETURN n,r,m LIMIT 50'
-})
 
 // 모크 온톨로지 데이터
 const mockData = reactive<MockGraphData>({
@@ -190,12 +119,6 @@ const visOptions = computed(() => ({
   }
 }))
 
-// NeoVis 유틸리티 함수
-const resolveNeoVis = (): any => {
-  const g = window as any
-  return g.NeoVis?.NeoVis || g.NeoVis?.default || g.NeoVis || null
-}
-
 // 모크 그래프 렌더링
 const renderMock = async (): Promise<void> => {
   status.value = 'rendering'
@@ -218,85 +141,10 @@ const renderMock = async (): Promise<void> => {
   }
 }
 
-// NeoVis 그래프 렌더링
-const renderNeoVis = async (): Promise<void> => {
-  const NeoVisClass = resolveNeoVis()
-  if (!NeoVisClass) {
-    console.warn('NeoVis library not detected. Check CDN script tag.')
-    status.value = 'error'
-    return
-  }
-  
-  status.value = 'connecting'
-  await nextTick()
-
-  // 기존 네트워크 정리
-  if (network.value) {
-    network.value.destroy()
-    network.value = null
-  }
-  
-  if (viz.value) {
-    try {
-      viz.value.clearNetwork()
-    } catch (_) {
-      // 에러 무시
-    }
-    viz.value = null
-  }
-
-  const config = {
-    containerId: container.value?.id || 'graph-container',
-    neo4j: {
-      serverUrl: neo4j.url,
-      serverUser: neo4j.user,
-      serverPassword: neo4j.password,
-      database: neo4j.database
-    },
-    labels: {
-      Person: { caption: 'name' },
-      Company: { caption: 'name' },
-      Technology: { caption: 'name' },
-      Concept: { caption: 'name' },
-    },
-    relationships: {
-      WORKS_AT: { caption: true },
-      USES: { caption: true },
-      MODELS: { caption: true },
-      VISUALIZES: { caption: true },
-    },
-    visConfig: visOptions.value,
-    initialCypher: neo4j.initialCypher
-  }
-
-  try {
-    viz.value = new NeoVisClass(config)
-    viz.value.render()
-    status.value = 'ready'
-  } catch (err) {
-    console.error(err)
-    status.value = 'error'
-  }
-}
-
-// 모드 전환
-const switchMode = async (newMode: GraphMode): Promise<void> => {
-  mode.value = newMode
-  if (newMode === 'mock') {
-    await renderMock()
-  } else {
-    await renderNeoVis()
-  }
-}
-
 // 그래프 피팅
 const fit = (): void => {
-  if (mode.value === 'mock' && network.value) {
+  if (network.value) {
     network.value.fit({ animation: true })
-  }
-  // NeoVis는 내부적으로 vis 네트워크를 사용
-  if (mode.value === 'neovis' && viz.value && viz.value._network) {
-    viz.value._network.fit({ animation: true })
   }
 }
 
@@ -307,10 +155,6 @@ onMounted(async () => {
 
 // 옵션 변경 감시
 watch([physics, hierarchical], async () => {
-  if (mode.value === 'mock') {
-    await renderMock()
-  } else {
-    await renderNeoVis()
-  }
+  await renderMock()
 })
 </script>
