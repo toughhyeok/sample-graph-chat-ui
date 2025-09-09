@@ -30,14 +30,20 @@
         v-model="input" 
         @keydown="handleKey"
         rows="2" 
-        placeholder="메시지를 입력하고 Ctrl/⌘+Enter로 전송"
+        placeholder="Ask about root causes and causal relationships... (Ctrl/⌘+Enter to send)"
         class="flex-1 resize-none rounded-lg border border-gray-300 p-3 focus:outline-none focus:ring-2 focus:ring-blue-500 shadow"
       />
       <button 
         @click="send" 
-        class="px-5 py-2 rounded-lg bg-blue-600 text-white shadow hover:bg-blue-700 transition"
+        :disabled="isLoading"
+        :class="[
+          'px-5 py-2 rounded-lg shadow transition',
+          isLoading 
+            ? 'bg-gray-400 text-gray-600 cursor-not-allowed' 
+            : 'bg-blue-600 text-white hover:bg-blue-700'
+        ]"
       >
-        보내기
+        {{ isLoading ? 'Sending...' : 'Send' }}
       </button>
     </div>
   </div>
@@ -60,28 +66,74 @@ const formatTime = (timestamp: any): string => {
   return timestamp.format('HH:mm')
 }
 
+// 로딩 상태
+const isLoading = ref<boolean>(false)
+
 // 메소드들
-const send = (): void => {
+const send = async (): Promise<void> => {
   const text = input.value.trim()
-  if (!text) return
+  if (!text || isLoading.value) return
   
   // 사용자 메시지 추가
-  messages.value.push({ role: 'user', text, timestamp: dayjs() })
+  const userMessage: ChatMessage = { role: 'user', text, timestamp: dayjs() }
+  messages.value.push(userMessage)
+  input.value = ''
+  isLoading.value = true
   
-  // 플레이스홀더 응답 (실제로는 API 호출로 대체)
-  setTimeout(() => {
+  try {
+    // FastAPI 서버로 직접 요청
+    const claudeMessages = messages.value
+      .filter((msg: ChatMessage) => msg.text.trim())
+      .map((msg: ChatMessage) => ({
+        role: msg.role,
+        content: msg.text
+      }))
+
+    const response = await fetch('/api/claude/messages', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        messages: claudeMessages
+      })
+    })
+
+    if (!response.ok) {
+      const errorText = await response.text()
+      throw new Error(`API error: ${response.status} - ${errorText}`)
+    }
+
+    const data = await response.json()
+    
+    if (data.content && data.content.length > 0) {
+      // Assistant 응답 추가
+      messages.value.push({
+        role: 'assistant',
+        text: data.content[0].text,
+        timestamp: dayjs()
+      })
+    } else {
+      throw new Error('No content in response')
+    }
+    
+  } catch (error) {
+    console.error('Failed to get response:', error)
+    
+    // 에러 발생 시 대체 메시지
     messages.value.push({
       role: 'assistant',
-      text: 'Based on the ontology analysis, I can identify potential causal chains and root causes. This response will be powered by the backend LLM API when integrated.',
+      text: `I apologize, but I'm currently unable to process your request. Please check your API configuration and try again. Error: ${error instanceof Error ? error.message : 'Unknown error'}`,
       timestamp: dayjs()
     })
-  }, 300)
-  
-  input.value = ''
+  } finally {
+    isLoading.value = false
+  }
 }
 
 const handleKey = (event: KeyboardEvent): void => {
-  if ((event.ctrlKey || event.metaKey) && event.key === 'Enter') {
+  if ((event.ctrlKey || event.metaKey) && event.key === 'Enter' && !isLoading.value) {
+    event.preventDefault()
     send()
   }
 }
