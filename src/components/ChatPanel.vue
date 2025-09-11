@@ -69,6 +69,10 @@
 import { ref, nextTick } from 'vue'
 import dayjs from 'dayjs'
 import type { ChatMessage } from '../types'
+import { useEventBus, EVENTS } from '../composables/useEventBus'
+
+// Event Bus 초기화
+const { emit } = useEventBus()
 
 // 반응성 데이터
 const messages = ref<ChatMessage[]>([
@@ -137,12 +141,17 @@ const send = async (): Promise<void> => {
     const data = await response.json()
     
     if (data.content && data.content.length > 0) {
+      const assistantText = data.content[0].text
+      
       // Assistant 응답 추가
       messages.value.push({
         role: 'assistant',
-        text: data.content[0].text,
+        text: assistantText,
         timestamp: dayjs()
       })
+      
+      // Event Bus로 하이라이트 요청
+      emit(EVENTS.HIGHLIGHT_TEXT, assistantText)
       
       // 스크롤 이동
       await scrollToBottom()
