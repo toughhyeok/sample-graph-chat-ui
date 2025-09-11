@@ -41,52 +41,65 @@ async def root():
     return {"message": "🦖 RAPTOR API Server is running!"}
 
 @app.post("/api/claude/messages", response_model=dict)
-async def proxy_claude_api(request: ChatRequest):
-    """Claude API 프록시 엔드포인트"""
+async def proxy_ollama_api(request: ChatRequest):
+    """Ollama API 프록시 엔드포인트"""
     
-    # API 키 확인
-    api_key = os.getenv("CLAUDE_API_KEY")
-    if not api_key:
-        raise HTTPException(
-            status_code=500, 
-            detail="Claude API key not configured. Please set CLAUDE_API_KEY environment variable."
-        )
+    # Ollama 서버 URL (기본값: localhost:11434)
+    ollama_url = os.getenv("OLLAMA_URL", "http://localhost:11434")
+    model = os.getenv("OLLAMA_MODEL", "deepseek-r1:1.5b")
     
-    # Claude API 호출
-    headers = {
-        "Content-Type": "application/json",
-        "x-api-key": api_key,
-        "anthropic-version": "2023-06-01"
-    }
+    # Ollama API 호출을 위한 메시지 형식 변환
+    messages = []
+    system_message = "You are RAPTOR, an AI assistant specialized in root cause analysis and causal relationship identification. You help users understand complex systems through ontology-based reasoning to identify root causes of problems."
+    
+    # 시스템 메시지를 첫 번째 메시지로 추가
+    messages.append({"role": "system", "content": system_message})
+    
+    # 사용자 메시지들 추가
+    for msg in request.messages:
+        messages.append({"role": msg.role, "content": msg.content})
     
     payload = {
-        "model": "claude-sonnet-4-20250514",
-        "max_tokens": 1000,
-        "system": "You are RAPTOR, an AI assistant specialized in root cause analysis and causal relationship identification. You help users understand complex systems through ontology-based reasoning to identify root causes of problems.",
-        "messages": [{"role": msg.role, "content": msg.content} for msg in request.messages]
+        "model": model,
+        "messages": messages,
+        "stream": False
     }
     
     try:
         async with httpx.AsyncClient() as client:
             response = await client.post(
-                "https://api.anthropic.com/v1/messages",
-                headers=headers,
+                f"{ollama_url}/api/chat",
                 json=payload,
-                timeout=30.0
+                timeout=60.0
             )
             
             if response.status_code != 200:
                 raise HTTPException(
                     status_code=response.status_code,
-                    detail=f"Claude API error: {response.text}"
+                    detail=f"Ollama API error: {response.text}"
                 )
             
-            return response.json()
+            ollama_response = response.json()
+            
+            # Claude API 형식으로 응답 변환
+            claude_format_response = {
+                "content": [{"text": ollama_response["message"]["content"]}],
+                "id": "ollama-" + str(hash(ollama_response["message"]["content"]))[:10],
+                "model": model,
+                "role": "assistant",
+                "stop_reason": "end_turn",
+                "usage": {
+                    "input_tokens": 0,
+                    "output_tokens": 0
+                }
+            }
+            
+            return claude_format_response
             
     except httpx.TimeoutException:
-        raise HTTPException(status_code=408, detail="Request to Claude API timed out")
+        raise HTTPException(status_code=408, detail="Request to Ollama API timed out")
     except httpx.RequestError as e:
-        raise HTTPException(status_code=502, detail=f"Failed to connect to Claude API: {str(e)}")
+        raise HTTPException(status_code=502, detail=f"Failed to connect to Ollama API: {str(e)}")
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
 
